@@ -192,3 +192,67 @@ export interface RfqComparisonData {
   quotations: Quotation[];
   lineItemsMatrix: RfqLineItemMatrixRow[];
 }
+
+export interface NavigationBadgeCounts {
+  totalRfqs?: number;
+  draftRfqs?: number;
+  publishedRfqs?: number;
+  closedRfqs?: number;
+  awardedRfqs?: number;
+  totalQuotes?: number;
+  totalUsers?: number;
+  openRfqs?: number;
+  myQuotes?: number;
+  submittedQuotes?: number;
+  shortlistedQuotes?: number;
+  acceptedQuotes?: number;
+  rejectedQuotes?: number;
+  totalQuotesReceived?: number;
+  [key: string]: number | undefined;
+}
+
+export interface NavigationCategorySummary {
+  id: number;
+  name: string;
+  activeRfqCount: number;
+}
+
+export interface NavigationSummaryData {
+  role: string;
+  badges: NavigationBadgeCounts;
+  categories: NavigationCategorySummary[];
+}
+
+export interface GlobalSearchRfqItem {
+  id: number;
+  title: string;
+  status: string;
+  location?: string | null;
+  currency?: string;
+  deadline?: string;
+  totalPriceRfq?: number | null;
+  categories: string[];
+  lineItems: Array<{ id: number; name: string; quantity: number; unit: string }>;
+}
+
+export interface GlobalSearchCategoryItem {
+  id: number;
+  name: string;
+  rfqCount: number;
+}
+
+export interface GlobalSearchQuoteItem {
+  id: number;
+  quoteNo: string;
+  status: string;
+  totalPriceQuote: string;
+  rfq?: { id: number; title: string };
+}
+
+export interface GlobalSearchResults {
+  query: string;
+  rfqs: GlobalSearchRfqItem[];
+  categories: GlobalSearchCategoryItem[];
+  quotations: GlobalSearchQuoteItem[];
+}
+

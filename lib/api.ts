@@ -1,6 +1,14 @@
 import Cookies from "js-cookie";
 import { ApiResponse, AuthResponseData, LoginCredentials, SignupCredentials } from "@/types/auth";
-import { Category, CreateRfqInput, Quotation, RFQ, UpdateRfqInput } from "@/types/rfq";
+import {
+  Category,
+  CreateRfqInput,
+  Quotation,
+  RFQ,
+  UpdateRfqInput,
+  NavigationSummaryData,
+  GlobalSearchResults,
+} from "@/types/rfq";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/v1";
@@ -169,14 +177,38 @@ export const api = {
   async getRfqs(params?: {
     status?: string;
     search?: string;
+    keyword?: string;
+    location?: string;
     category?: string;
+    categoryId?: number;
+    openOnly?: boolean;
+    deadlineBefore?: string;
+    deadlineAfter?: string;
+    minBudget?: number;
+    maxBudget?: number;
+    sortBy?: string;
+    sortOrder?: "asc" | "desc";
+    page?: number;
+    limit?: number;
     filterScope?: "my" | "all";
   }): Promise<RFQ[]> {
     try {
       const queryParams = new URLSearchParams();
       if (params?.status) queryParams.set("status", params.status);
       if (params?.search) queryParams.set("search", params.search);
+      if (params?.keyword) queryParams.set("keyword", params.keyword);
+      if (params?.location) queryParams.set("location", params.location);
       if (params?.category) queryParams.set("category", params.category);
+      if (params?.categoryId) queryParams.set("categoryId", params.categoryId.toString());
+      if (params?.openOnly !== undefined) queryParams.set("openOnly", String(params.openOnly));
+      if (params?.deadlineBefore) queryParams.set("deadlineBefore", params.deadlineBefore);
+      if (params?.deadlineAfter) queryParams.set("deadlineAfter", params.deadlineAfter);
+      if (params?.minBudget !== undefined) queryParams.set("minBudget", params.minBudget.toString());
+      if (params?.maxBudget !== undefined) queryParams.set("maxBudget", params.maxBudget.toString());
+      if (params?.sortBy) queryParams.set("sortBy", params.sortBy);
+      if (params?.sortOrder) queryParams.set("sortOrder", params.sortOrder);
+      if (params?.page) queryParams.set("page", params.page.toString());
+      if (params?.limit) queryParams.set("limit", params.limit.toString());
       if (params?.filterScope) queryParams.set("filterScope", params.filterScope);
 
       const qs = queryParams.toString() ? `?${queryParams.toString()}` : "";
@@ -415,9 +447,48 @@ export const api = {
     }
     return data.data;
   },
+
+  async getNavigationSummary(): Promise<NavigationSummaryData> {
+    const response = await fetch(`${API_BASE_URL}/navigation/summary`, {
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeaders(),
+      },
+    });
+    const data = await response.json();
+    if (!response.ok || data.status === "error") {
+      throw new ApiError(data.message || "Failed to load navigation summary", response.status);
+    }
+    return data.data;
+  },
+
+  async searchGlobal(query: string, limit: number = 8): Promise<GlobalSearchResults> {
+    if (!query.trim()) {
+      return { query: "", rfqs: [], categories: [], quotations: [] };
+    }
+    const response = await fetch(
+      `${API_BASE_URL}/search?q=${encodeURIComponent(query)}&limit=${limit}`,
+      {
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+      }
+    );
+    const data = await response.json();
+    if (!response.ok || data.status === "error") {
+      throw new ApiError(data.message || "Failed to perform global search", response.status);
+    }
+    return data.data;
+  },
 };
 
 // Direct export helpers
 export const getRfqComparison = api.getRfqComparison;
 export const awardQuotation = api.awardQuotation;
 export const reviseQuotation = api.reviseQuotation;
+export const getNavigationSummary = api.getNavigationSummary;
+export const searchGlobal = api.searchGlobal;
+
+// File Attachment helpers
+export * from "./files";

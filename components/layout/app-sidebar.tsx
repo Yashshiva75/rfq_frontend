@@ -21,21 +21,17 @@ import {
   PlusCircle,
   Inbox,
   Send,
-  Users,
   Shield,
   Layers,
-  BarChart3,
-  Building2,
-  FileCheck2,
-  History,
-  Activity,
   LogOut,
   FolderOpen,
   Briefcase,
   Store,
+  Tag,
 } from "lucide-react";
 import { AuthUser, UserRole } from "@/types/auth";
 import { api } from "@/lib/api";
+import { NavigationCategorySummary } from "@/types/rfq";
 
 export interface SidebarBadgeCounts {
   openTenders?: number;
@@ -44,6 +40,9 @@ export interface SidebarBadgeCounts {
   receivedQuotations?: number;
   activeRfqs?: number;
   totalUsers?: number;
+  draftRfqs?: number;
+  publishedRfqs?: number;
+  awardedRfqs?: number;
   [key: string]: number | string | undefined;
 }
 
@@ -53,6 +52,7 @@ interface AppSidebarProps {
   activeTab?: string;
   onSelectTab?: (tab: string) => void;
   onSwitchRole?: (newRole: UserRole) => void;
+  onSelectCategory?: (categoryName: string) => void;
   badgeCounts?: SidebarBadgeCounts;
 }
 
@@ -62,40 +62,65 @@ export function AppSidebar({
   activeTab = "overview",
   onSelectTab,
   onSwitchRole,
+  onSelectCategory,
   badgeCounts,
 }: AppSidebarProps) {
   const { open } = useSidebar();
   const currentRole = (user.role || "buyer").toLowerCase() as UserRole;
 
-  // Local fallback state to dynamically fetch counts if not provided via props
+  // Real-time navigation badges and category counters from live backend API
   const [internalCounts, setInternalCounts] = React.useState<SidebarBadgeCounts>({});
+  const [activeCategories, setActiveCategories] = React.useState<NavigationCategorySummary[]>([]);
 
   React.useEffect(() => {
     let isMounted = true;
-    const fetchCounts = async () => {
+    const fetchSummary = async () => {
       try {
-        const [rfqsResult, quotesResult] = await Promise.allSettled([
-          api.getRfqs(),
-          api.getQuotations(),
-        ]);
+        const summary = await api.getNavigationSummary();
         if (!isMounted) return;
 
-        const rfqs = rfqsResult.status === "fulfilled" ? rfqsResult.value : [];
-        const quotes = quotesResult.status === "fulfilled" ? quotesResult.value : [];
+        const b = summary.badges || {};
+        if (summary.role === "vendor") {
+          setInternalCounts({
+            openTenders: b.openRfqs ?? 0,
+            submittedQuotes: b.myQuotes ?? b.submittedQuotes ?? 0,
+            awardedContracts: b.acceptedQuotes ?? 0,
+            receivedQuotations: b.myQuotes ?? 0,
+            activeRfqs: b.openRfqs ?? 0,
+          });
+        } else if (summary.role === "admin") {
+          setInternalCounts({
+            openTenders: b.publishedRfqs ?? 0,
+            submittedQuotes: b.totalQuotes ?? 0,
+            awardedContracts: b.awardedRfqs ?? 0,
+            receivedQuotations: b.totalQuotes ?? 0,
+            activeRfqs: b.totalRfqs ?? 0,
+            totalUsers: b.totalUsers ?? 0,
+            draftRfqs: b.draftRfqs ?? 0,
+            publishedRfqs: b.publishedRfqs ?? 0,
+          });
+        } else {
+          // Buyer
+          setInternalCounts({
+            openTenders: b.publishedRfqs ?? 0,
+            submittedQuotes: b.totalQuotesReceived ?? 0,
+            awardedContracts: b.awardedRfqs ?? 0,
+            receivedQuotations: b.totalQuotesReceived ?? 0,
+            activeRfqs: b.totalRfqs ?? 0,
+            draftRfqs: b.draftRfqs ?? 0,
+            publishedRfqs: b.publishedRfqs ?? 0,
+          });
+        }
 
-        setInternalCounts({
-          openTenders: rfqs.filter((r: any) => r.status === "PUBLISHED").length,
-          submittedQuotes: quotes.length,
-          awardedContracts: quotes.filter((q: any) => q.status === "ACCEPTED").length,
-          receivedQuotations: quotes.length,
-          activeRfqs: rfqs.length,
-        });
+        if (summary.categories) {
+          setActiveCategories(summary.categories);
+        }
       } catch {
         // Fallback gracefully
       }
     };
 
-    fetchCounts();
+    fetchSummary();
     return () => {
       isMounted = false;
     };
@@ -140,23 +165,6 @@ export function AppSidebar({
               },
             ],
           },
-          {
-            label: "Supplier Management",
-            items: [
-              {
-                id: "vendors",
-                title: "Suppliers Directory",
-                icon: Users,
-                badge: undefined,
-              },
-              {
-                id: "analytics",
-                title: "Procurement Analytics",
-                icon: BarChart3,
-                badge: undefined,
-              },
-            ],
-          },
         ];
 
       case "vendor":
@@ -182,29 +190,6 @@ export function AppSidebar({
                 icon: Send,
                 badge: String(effectiveCounts.submittedQuotes ?? 0),
               },
-              {
-                id: "awarded",
-                title: "Awarded Contracts",
-                icon: FileCheck2,
-                badge: String(effectiveCounts.awardedContracts ?? 0),
-              },
-            ],
-          },
-          {
-            label: "Vendor Operations",
-            items: [
-              {
-                id: "profile",
-                title: "Supplier Profile",
-                icon: Building2,
-                badge: undefined,
-              },
-              {
-                id: "compliance",
-                title: "Compliance & Docs",
-                icon: Shield,
-                badge: undefined,
-              },
             ],
           },
         ];
@@ -221,54 +206,10 @@ export function AppSidebar({
                 badge: undefined,
               },
               {
-                id: "users",
-                title: "User Management",
-                icon: Users,
-                badge:
-                  effectiveCounts.totalUsers && effectiveCounts.totalUsers > 0
-                    ? String(effectiveCounts.totalUsers)
-                    : undefined,
-              },
-              {
                 id: "roles",
                 title: "Roles & RBAC Matrix",
                 icon: Shield,
-                badge: "3",
-              },
-            ],
-          },
-          {
-            label: "Procurement Oversight",
-            items: [
-              {
-                id: "all-rfqs",
-                title: "Global RFQ Audits",
-                icon: FileText,
-                badge:
-                  effectiveCounts.activeRfqs && effectiveCounts.activeRfqs > 0
-                    ? String(effectiveCounts.activeRfqs)
-                    : undefined,
-              },
-              {
-                id: "all-quotes",
-                title: "Global Quotations",
-                icon: Inbox,
-                badge:
-                  effectiveCounts.receivedQuotations && effectiveCounts.receivedQuotations > 0
-                    ? String(effectiveCounts.receivedQuotations)
-                    : undefined,
-              },
-              {
-                id: "audit-logs",
-                title: "System Audit Trail",
-                icon: History,
                 badge: undefined,
-              },
-              {
-                id: "health",
-                title: "Database Health",
-                icon: Activity,
-                badge: "Live",
               },
             ],
           },
@@ -371,6 +312,35 @@ export function AppSidebar({
           </SidebarGroup>
         ))}
 
+        {/* Active Categories from Navigation Summary API */}
+        {activeCategories.length > 0 && open && (
+          <SidebarGroup>
+            <SidebarGroupLabel className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider flex items-center justify-between">
+              <span>Active Sectors</span>
+              <Tag className="size-3 text-[#008779]" />
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {activeCategories.slice(0, 6).map((cat) => (
+                  <SidebarMenuItem key={cat.id}>
+                    <SidebarMenuButton
+                      onClick={() => onSelectCategory?.(cat.name)}
+                      className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white text-xs cursor-pointer"
+                    >
+                      <Tag className="size-3 text-slate-400 shrink-0" />
+                      <span className="truncate">{cat.name}</span>
+                      {cat.activeRfqCount > 0 && (
+                        <SidebarMenuBadge className="text-[10px] font-mono text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800">
+                          {cat.activeRfqCount}
+                        </SidebarMenuBadge>
+                      )}
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
 
       {/* Footer Profile & Logout */}

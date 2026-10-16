@@ -62,12 +62,18 @@ import {
   Zap,
   Check,
   Sparkles,
+  Paperclip,
+  AlertCircle,
 } from "lucide-react";
 import { AuthUser, UserRole } from "@/types/auth";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { Category, Quotation, RFQ, RFQLineItem, RfqComparisonData } from "@/types/rfq";
+import { FileAttachmentManager } from "@/components/file-attachment";
+import { uploadAttachment } from "@/lib/files";
+import { AdminRbacScreen } from "@/components/admin/admin-rbac-screen";
+import { TableSearchBar } from "@/components/search/table-search-bar";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -109,8 +115,15 @@ export default function DashboardPage() {
   const [isCreatingRfq, setIsCreatingRfq] = useState(false);
   const [rfqStatusFilter, setRfqStatusFilter] = useState<string>("ALL");
 
-  // Search & Sorting state for Quotation Dashboard
+  // Search, Filters & Sorting state for Quotation Dashboard
   const [searchQuery, setSearchQuery] = useState("");
+  const [filterLocation, setFilterLocation] = useState<string>("ALL");
+  const [filterCategory, setFilterCategory] = useState<string>("ALL");
+  const [filterOpenOnly, setFilterOpenOnly] = useState<boolean>(false);
+  const [filterMinBudget, setFilterMinBudget] = useState<string>("");
+  const [filterMaxBudget, setFilterMaxBudget] = useState<string>("");
+  const [isFiltersExpanded, setIsFiltersExpanded] = useState<boolean>(false);
+  const [isSearchingBackend, setIsSearchingBackend] = useState<boolean>(false);
   const [sortField, setSortField] = useState<string>("dateRaw");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
@@ -124,6 +137,8 @@ export default function DashboardPage() {
     Record<number, { unitPrice: string; notes: string }>
   >({});
   const [isSubmittingQuote, setIsSubmittingQuote] = useState(false);
+  const [quotePendingFile, setQuotePendingFile] = useState<File | null>(null);
+  const [quoteFileError, setQuoteFileError] = useState<string | null>(null);
 
   // View RFQ Detail Modal State
   const [selectedDetailRfq, setSelectedDetailRfq] = useState<any | null>(null);
@@ -180,12 +195,69 @@ export default function DashboardPage() {
   const handleResetFilters = () => {
     setSearchQuery("");
     setRfqStatusFilter("ALL");
+    setFilterLocation("ALL");
+    setFilterCategory("ALL");
+    setFilterOpenOnly(false);
+    setFilterMinBudget("");
+    setFilterMaxBudget("");
     setSortField("dateRaw");
     setSortOrder("desc");
+    loadData();
     toast.info("Filters reset to default", {
       description: "Displaying all quotation and RFQ records.",
     });
   };
+
+  // Debounced backend synchronization for comprehensive search & filters
+  useEffect(() => {
+    if (!user) return;
+    const timer = setTimeout(async () => {
+      try {
+        setIsSearchingBackend(true);
+        const data = await api.getRfqs({
+          search: searchQuery.trim() || undefined,
+          keyword: searchQuery.trim() || undefined,
+          location: filterLocation !== "ALL" ? filterLocation : undefined,
+          category: filterCategory !== "ALL" ? filterCategory : undefined,
+          status: ["DRAFT", "PUBLISHED", "CLOSED", "AWARDED"].includes(rfqStatusFilter)
+            ? rfqStatusFilter
+            : undefined,
+          openOnly: filterOpenOnly ? true : undefined,
+          minBudget: filterMinBudget ? Number(filterMinBudget) : undefined,
+          maxBudget: filterMaxBudget ? Number(filterMaxBudget) : undefined,
+          sortBy:
+            sortField === "dateRaw"
+              ? "createdAt"
+              : sortField === "sumInsured"
+              ? "budget"
+              : sortField === "product"
+              ? "title"
+              : undefined,
+          sortOrder: sortOrder,
+        });
+        if (data && Array.isArray(data)) {
+          setRfqsList(data);
+        }
+      } catch (err) {
+        console.error("Backend RFQ search error:", err);
+      } finally {
+        setIsSearchingBackend(false);
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [
+    searchQuery,
+    filterLocation,
+    filterCategory,
+    rfqStatusFilter,
+    filterOpenOnly,
+    filterMinBudget,
+    filterMaxBudget,
+    sortField,
+    sortOrder,
+    user?.role,
+  ]);
 
   // Load user session
   useEffect(() => {
@@ -578,6 +650,8 @@ export default function DashboardPage() {
   const handleOpenQuoteModal = (rfq: RFQ) => {
     setRevisingQuoteId(null);
     setRevisingQuoteNo(null);
+    setQuotePendingFile(null);
+    setQuoteFileError(null);
     setQuoteModalRfq(rfq);
     setQuoteCurrency(rfq.currency || "INR");
     setQuoteDeliveryTime("14 business days");
@@ -613,6 +687,8 @@ export default function DashboardPage() {
 
     setRevisingQuoteId(quote.id);
     setRevisingQuoteNo(quote.quoteNo);
+    setQuotePendingFile(null);
+    setQuoteFileError(null);
 
     // Locate or construct target RFQ
     const fullRfq = rfqsList.find((r) => r.id === quote.rfqId);
@@ -708,6 +784,19 @@ export default function DashboardPage() {
           lineItems: lineItemsToSubmit,
         });
 
+        if (quotePendingFile) {
+          try {
+            await uploadAttachment({
+              file: quotePendingFile,
+              quotationId: revisingQuoteId,
+            });
+            toast.success("Document attached to revised quotation!");
+          } catch (uploadErr: any) {
+            console.error("Failed to upload attachment on revision:", uploadErr);
+            toast.error("Quote revised, but file upload failed: " + (uploadErr.message || "Upload error"));
+          }
+        }
+
         const revNumber = revisedQuote.revisions?.[0]?.revisionNo || 2;
         toast.success(`Quotation Revised Successfully! (Revision #${revNumber})`, {
           description: `Quote ${revisedQuote.quoteNo} updated with total: ${revisedQuote.currency} ${Number(revisedQuote.totalPriceQuote).toLocaleString()}`,
@@ -721,11 +810,26 @@ export default function DashboardPage() {
           lineItems: lineItemsToSubmit,
         });
 
+        if (quotePendingFile) {
+          try {
+            await uploadAttachment({
+              file: quotePendingFile,
+              quotationId: quote.id,
+            });
+            toast.success("Proposal document attached to quotation!");
+          } catch (uploadErr: any) {
+            console.error("Failed to upload attachment on quote creation:", uploadErr);
+            toast.error("Quote submitted, but file upload failed: " + (uploadErr.message || "Upload error"));
+          }
+        }
+
         toast.success("Quotation Submitted Successfully!", {
           description: `Quote ${quote.quoteNo} (${quote.currency} ${quote.totalPriceQuote}) has been submitted for RFQ #${quoteModalRfq.id}.`,
         });
       }
 
+      setQuotePendingFile(null);
+      setQuoteFileError(null);
       setQuoteModalRfq(null);
       setRevisingQuoteId(null);
       setRevisingQuoteNo(null);
@@ -884,17 +988,71 @@ export default function DashboardPage() {
   // Purely live dynamic items from backend API (quotations and RFQs) - No static fallback
   const allDashboardItems = [...inProcessQuotes, ...inProcessRfqs];
 
+  const availableLocations = Array.from(
+    new Set(
+      allDashboardItems
+        .map((i) => i.location)
+        .filter((loc) => loc && loc !== "—" && loc.trim() !== "")
+    )
+  ).sort();
+
+  const activeFiltersCount =
+    (searchQuery.trim() ? 1 : 0) +
+    (rfqStatusFilter !== "ALL" ? 1 : 0) +
+    (filterLocation !== "ALL" ? 1 : 0) +
+    (filterCategory !== "ALL" ? 1 : 0) +
+    (filterOpenOnly ? 1 : 0) +
+    (filterMinBudget.trim() ? 1 : 0) +
+    (filterMaxBudget.trim() ? 1 : 0);
+
   const filteredDashboardItems = allDashboardItems.filter((item) => {
+    // 1. Status Filter
     if (rfqStatusFilter !== "ALL") {
       if (rfqStatusFilter === "PUBLISHED" && item.status !== "PUBLISHED") return false;
       if (rfqStatusFilter === "DRAFT" && item.status !== "DRAFT") return false;
       if (rfqStatusFilter === "SUBMITTED" && item.status !== "SUBMITTED") return false;
       if (rfqStatusFilter === "SHORTLISTED" && item.status !== "SHORTLISTED") return false;
       if (rfqStatusFilter === "ACCEPTED" && item.status !== "ACCEPTED") return false;
+      if (rfqStatusFilter === "CLOSED" && item.status !== "CLOSED") return false;
+      if (rfqStatusFilter === "AWARDED" && item.status !== "AWARDED") return false;
     }
 
+    // 2. Location Filter
+    if (filterLocation && filterLocation !== "ALL") {
+      if (!item.location?.toLowerCase().includes(filterLocation.toLowerCase())) return false;
+    }
+
+    // 3. Category Filter
+    if (filterCategory && filterCategory !== "ALL") {
+      if (!item.category?.toLowerCase().includes(filterCategory.toLowerCase())) return false;
+    }
+
+    // 4. Open RFQs Only Filter
+    if (filterOpenOnly) {
+      if (item.status !== "PUBLISHED") return false;
+    }
+
+    // 5. Min Budget Filter
+    if (filterMinBudget) {
+      const min = Number(filterMinBudget);
+      if (!isNaN(min) && (item.amountRaw || 0) < min) return false;
+    }
+
+    // 6. Max Budget Filter
+    if (filterMaxBudget) {
+      const max = Number(filterMaxBudget);
+      if (!isNaN(max) && (item.amountRaw || 0) > max) return false;
+    }
+
+    // 7. Search Query Keyword Filter (matches title, description, location, line item names)
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase().trim();
+    const hasMatchingLineItem = item.lineItems?.some(
+      (li: any) =>
+        li.name?.toLowerCase().includes(q) ||
+        li.specifications?.toLowerCase().includes(q)
+    );
+
     return (
       item.code.toLowerCase().includes(q) ||
       item.contactName.toLowerCase().includes(q) ||
@@ -904,7 +1062,8 @@ export default function DashboardPage() {
       item.sumInsured.toLowerCase().includes(q) ||
       item.statusLabel.toLowerCase().includes(q) ||
       item.title.toLowerCase().includes(q) ||
-      item.category.toLowerCase().includes(q)
+      item.category.toLowerCase().includes(q) ||
+      hasMatchingLineItem
     );
   });
 
@@ -990,25 +1149,21 @@ export default function DashboardPage() {
         activeTab={activeTab}
         onSelectTab={setActiveTab}
         onSwitchRole={handleSwitchRole}
-        badgeCounts={{
-          openTenders: rfqsList.filter((r) => r.status === "PUBLISHED").length,
-          submittedQuotes: quotationsList.length,
-          awardedContracts: quotationsList.filter((q) => q.status === "ACCEPTED").length,
-          receivedQuotations: quotationsList.length,
-          activeRfqs: rfqsList.length,
-          totalUsers: seededUsers.length,
+        onSelectCategory={(catName) => {
+          setSearchQuery(catName);
+          setActiveTab("overview");
         }}
       />
 
       <SidebarInset className="bg-slate-50 dark:bg-slate-950 min-h-screen text-slate-900 dark:text-slate-100 flex flex-col w-full flex-1">
-        {/* Full-Width App Header with Sidebar Trigger & Dark Theme Toggler */}
-        <header className="sticky top-0 z-30 flex h-16 w-full shrink-0 items-center justify-between border-b border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xs px-6 md:px-8">
-          <div className="flex items-center gap-3">
+        {/* Full-Width App Header with Sidebar Trigger, Global Multi-Entity Search Bar & Theme Toggler */}
+        <header className="sticky top-0 z-30 flex h-16 w-full shrink-0 items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xs px-4 sm:px-6 md:px-8">
+          <div className="flex items-center gap-3 shrink-0">
             <SidebarTrigger />
             <div className="h-5 w-[1px] bg-slate-200 dark:border-slate-800" />
 
             {/* Breadcrumb / Section Name */}
-            <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 min-w-0">
+            <div className="hidden lg:flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 min-w-0">
               <span className="font-bold text-slate-900 dark:text-slate-100 capitalize">
                 {role} Workspace
               </span>
@@ -1020,7 +1175,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Right Header items */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5 shrink-0">
             <Badge
               variant={role === "admin" ? "admin" : role === "vendor" ? "vendor" : "buyer"}
               className="capitalize text-xs font-semibold px-2.5 py-1"
@@ -1229,39 +1384,276 @@ export default function DashboardPage() {
 
                   {/* Main Container Card: Search Input, Action Buttons, and Table */}
                   <div className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
-                    {/* Search & Actions Bar */}
-                    <div className="p-4 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800">
-                      {/* Left Search Input */}
-                      <div className="relative w-full sm:max-w-md">
-                        <Search className="size-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                        <input
-                          type="text"
-                          value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
-                          placeholder="SEARCH BY QUOTATION #, SUPPLIER, REQUIREMENT, CATEGORY, OR LOCATION..."
-                          className="w-full h-11 pl-10 pr-8 text-xs sm:text-sm font-medium rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 placeholder:uppercase focus:outline-none focus:ring-1 focus:ring-[#008779] focus:border-[#008779] transition-all uppercase"
-                        />
-                        {searchQuery && (
-                          <button
-                            onClick={() => setSearchQuery("")}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                    {/* Search & Actions Bar with Instant Autocomplete & Comprehensive Filters */}
+                    <div className="p-4 sm:p-5 flex flex-col gap-3 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900">
+                      <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+                        {/* Table Search Input with Instant Autocomplete Suggestions */}
+                        <div className="w-full sm:max-w-xl">
+                          <TableSearchBar
+                            value={searchQuery}
+                            onChange={(val) => setSearchQuery(val)}
+                            onSelectRfq={(rfq) => {
+                              const targetRfq = rfqsList.find((r) => r.id === rfq.id);
+                              if (targetRfq) {
+                                setSelectedDetailRfq(targetRfq);
+                              } else {
+                                api.getRfqById(rfq.id).then((r) => setSelectedDetailRfq(r)).catch(() => {});
+                              }
+                            }}
+                            onSelectCategory={(catName) => {
+                              setFilterCategory(catName);
+                            }}
+                            onSelectQuote={(quote) => {
+                              const targetQuote = quotationsList.find((q) => q.id === quote.id);
+                              if (targetQuote) {
+                                setSelectedDetailQuote(targetQuote);
+                              }
+                            }}
+                            placeholder="SEARCH BY RFQ #, QUOTATION #, SUPPLIER, REQUIREMENT, CATEGORY, OR LOCATION..."
+                          />
+                        </div>
+
+                        {/* Action Buttons: Filters Toggle & Reset */}
+                        <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end shrink-0">
+                          <Button
+                            variant={isFiltersExpanded ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => setIsFiltersExpanded(!isFiltersExpanded)}
+                            className={`h-11 px-4 text-xs sm:text-sm font-bold uppercase tracking-wider rounded-lg cursor-pointer flex items-center gap-2 transition-all ${
+                              isFiltersExpanded
+                                ? "bg-[#008779] text-white hover:bg-[#00766a]"
+                                : "border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
+                            }`}
                           >
-                            <X className="size-4" />
-                          </button>
-                        )}
+                            <Filter className="size-4" />
+                            <span>FILTERS</span>
+                            {activeFiltersCount > 0 && (
+                              <span className="size-5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black flex items-center justify-center shrink-0">
+                                {activeFiltersCount}
+                              </span>
+                            )}
+                          </Button>
+
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleResetFilters}
+                            className="h-11 px-4 text-xs sm:text-sm font-bold uppercase tracking-wider rounded-lg border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer flex items-center gap-2 shadow-2xs"
+                          >
+                            <RotateCcw className="size-4 text-slate-500" />
+                            <span>RESET FILTERS</span>
+                          </Button>
+                        </div>
                       </div>
 
-                      {/* Right Action Buttons */}
-                      <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleResetFilters}
-                          className="h-11 px-4 text-xs sm:text-sm font-bold uppercase tracking-wider rounded-lg border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer flex items-center gap-2 shadow-2xs"
-                        >
-                          <RotateCcw className="size-4 text-slate-500" />
-                          <span>RESET FILTERS</span>
-                        </Button>
+                      {/* Expandable Comprehensive Filters Panel */}
+                      {isFiltersExpanded && (
+                        <div className="pt-3 border-t border-slate-100 dark:border-slate-800 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3 animate-in fade-in slide-in-from-top-1 duration-150">
+                          {/* Location Filter */}
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                              <MapPin className="size-3 text-[#008779]" />
+                              Location
+                            </label>
+                            <select
+                              value={filterLocation}
+                              onChange={(e) => setFilterLocation(e.target.value)}
+                              className="w-full h-10 px-3 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-[#008779]"
+                            >
+                              <option value="ALL">All Locations</option>
+                              {availableLocations.map((loc) => (
+                                <option key={loc} value={loc}>
+                                  {loc}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Category Filter */}
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                              <Tag className="size-3 text-[#008779]" />
+                              Category
+                            </label>
+                            <select
+                              value={filterCategory}
+                              onChange={(e) => setFilterCategory(e.target.value)}
+                              className="w-full h-10 px-3 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-[#008779]"
+                            >
+                              <option value="ALL">All Categories</option>
+                              {categoriesList.map((cat) => (
+                                <option key={cat.id} value={cat.name}>
+                                  {cat.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Status Filter */}
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                              <Shield className="size-3 text-[#008779]" />
+                              Status
+                            </label>
+                            <select
+                              value={rfqStatusFilter}
+                              onChange={(e) => setRfqStatusFilter(e.target.value)}
+                              className="w-full h-10 px-3 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-[#008779]"
+                            >
+                              <option value="ALL">All Statuses</option>
+                              <option value="PUBLISHED">Published / Open</option>
+                              <option value="DRAFT">Draft</option>
+                              <option value="SUBMITTED">Submitted Quotes</option>
+                              <option value="SHORTLISTED">Shortlisted Quotes</option>
+                              <option value="ACCEPTED">Accepted / Awarded</option>
+                              <option value="CLOSED">Closed</option>
+                              <option value="AWARDED">Awarded</option>
+                            </select>
+                          </div>
+
+                          {/* Budget Range (Min Budget) */}
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                              <DollarSign className="size-3 text-[#008779]" />
+                              Min Budget
+                            </label>
+                            <input
+                              type="number"
+                              value={filterMinBudget}
+                              onChange={(e) => setFilterMinBudget(e.target.value)}
+                              placeholder="e.g. 10000"
+                              className="w-full h-10 px-3 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-[#008779]"
+                            />
+                          </div>
+
+                          {/* Open RFQs Only Toggle */}
+                          <div className="space-y-1 flex flex-col justify-end">
+                            <button
+                              type="button"
+                              onClick={() => setFilterOpenOnly(!filterOpenOnly)}
+                              className={`h-10 px-3 rounded-lg border text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer transition-colors ${
+                                filterOpenOnly
+                                  ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-400 text-emerald-700 dark:text-emerald-300"
+                                  : "border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
+                              }`}
+                            >
+                              <CheckCircle2
+                                className={`size-3.5 ${
+                                  filterOpenOnly ? "text-emerald-600" : "text-slate-400"
+                                }`}
+                              />
+                              <span>Open RFQs Only</span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Active Filter Chips & Results Count Bar */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                          <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                            Showing{" "}
+                            <strong className="text-slate-900 dark:text-slate-100 font-bold">
+                              {sortedDashboardItems.length}
+                            </strong>{" "}
+                            of {allDashboardItems.length} records
+                          </span>
+
+                          {searchQuery && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-[#008779]/10 text-[#008779] dark:bg-[#008779]/20 border border-[#008779]/30">
+                              Keyword: &ldquo;{searchQuery}&rdquo;
+                              <button
+                                type="button"
+                                onClick={() => setSearchQuery("")}
+                                className="cursor-pointer hover:text-slate-900 dark:hover:text-white"
+                              >
+                                <X className="size-3" />
+                              </button>
+                            </span>
+                          )}
+
+                          {filterLocation !== "ALL" && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                              Location: {filterLocation}
+                              <button
+                                type="button"
+                                onClick={() => setFilterLocation("ALL")}
+                                className="cursor-pointer hover:text-blue-950 dark:hover:text-white"
+                              >
+                                <X className="size-3" />
+                              </button>
+                            </span>
+                          )}
+
+                          {filterCategory !== "ALL" && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                              Category: {filterCategory}
+                              <button
+                                type="button"
+                                onClick={() => setFilterCategory("ALL")}
+                                className="cursor-pointer hover:text-indigo-950 dark:hover:text-white"
+                              >
+                                <X className="size-3" />
+                              </button>
+                            </span>
+                          )}
+
+                          {rfqStatusFilter !== "ALL" && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                              Status: {rfqStatusFilter}
+                              <button
+                                type="button"
+                                onClick={() => setRfqStatusFilter("ALL")}
+                                className="cursor-pointer hover:text-amber-950 dark:hover:text-white"
+                              >
+                                <X className="size-3" />
+                              </button>
+                            </span>
+                          )}
+
+                          {filterOpenOnly && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                              Open RFQs Only
+                              <button
+                                type="button"
+                                onClick={() => setFilterOpenOnly(false)}
+                                className="cursor-pointer hover:text-emerald-950 dark:hover:text-white"
+                              >
+                                <X className="size-3" />
+                              </button>
+                            </span>
+                          )}
+
+                          {filterMinBudget && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-purple-50 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                              Min Budget: {filterMinBudget}
+                              <button
+                                type="button"
+                                onClick={() => setFilterMinBudget("")}
+                                className="cursor-pointer hover:text-purple-950 dark:hover:text-white"
+                              >
+                                <X className="size-3" />
+                              </button>
+                            </span>
+                          )}
+
+                          {activeFiltersCount > 0 && (
+                            <button
+                              type="button"
+                              onClick={handleResetFilters}
+                              className="text-[11px] text-rose-600 dark:text-rose-400 hover:underline font-semibold cursor-pointer ml-1"
+                            >
+                              Clear all
+                            </button>
+                          )}
+                        </div>
+
+                        {isSearchingBackend && (
+                          <div className="flex items-center gap-1 text-[11px] text-[#008779] font-medium animate-pulse">
+                            <Loader2 className="size-3 animate-spin" />
+                            <span>Syncing backend...</span>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -2006,6 +2398,18 @@ export default function DashboardPage() {
                           </div>
                         )}
 
+                        {/* View Quotation Details & Documents */}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setSelectedDetailQuote(quote)}
+                          className="h-8 px-3 text-xs font-bold border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1 cursor-pointer"
+                          title="View Quotation Details & Manage Attachments"
+                        >
+                          <Eye className="size-3.5" />
+                          <span>Details</span>
+                        </Button>
+
                         {/* Revise Action for Vendor & Admin */}
                         {(role === "vendor" || role === "admin") && quote.status !== "ACCEPTED" && quote.status !== "REJECTED" && (
                           <Button
@@ -2119,75 +2523,10 @@ export default function DashboardPage() {
             </Card>
           )}
 
-          {/* TAB: USERS & ROLES (Admin) - Full Width Tables */}
+          {/* TAB: USERS & ROLES (Admin) - Live RBAC Management Screen */}
           {(activeTab === "users" || activeTab === "roles") && (
-            <div className="space-y-6 w-full">
-              <Card className="border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs rounded-xl overflow-hidden w-full">
-                <CardHeader className="p-6 pb-4 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900">
-                  <CardTitle className="text-lg font-bold text-slate-900 dark:text-slate-100">
-                    User Management
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <div className="overflow-x-auto w-full">
-                    <table className="w-full text-xs text-left">
-                      <thead className="bg-slate-50/80 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-bold uppercase tracking-wider">
-                        <tr>
-                          <th className="py-3 px-6">Name</th>
-                          <th className="py-3 px-6">Role</th>
-                          <th className="py-3 px-6">Email</th>
-                          <th className="py-3 px-6">Permissions</th>
-                          <th className="py-3 px-6">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                        {seededUsers.map((u) => (
-                          <tr key={u.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/60">
-                            <td className="py-4 px-6 font-semibold text-slate-900 dark:text-slate-100">
-                              {u.name}
-                            </td>
-                            <td className="py-4 px-6">
-                              <Badge variant={u.role as any} className="capitalize text-[10px]">
-                                {u.role}
-                              </Badge>
-                            </td>
-                            <td className="py-4 px-6 font-mono text-slate-600 dark:text-slate-400 font-medium">
-                              {u.email}
-                            </td>
-                            <td className="py-4 px-6 text-slate-600 dark:text-slate-400 font-medium">
-                              {u.permissions} Granted
-                            </td>
-                            <td className="py-4 px-6 text-emerald-700 dark:text-emerald-400 font-semibold">
-                              {u.status}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs rounded-xl overflow-hidden w-full">
-                <CardHeader className="p-6 pb-4 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900">
-                  <CardTitle className="text-lg font-bold text-slate-900 dark:text-slate-100">
-                    RBAC Permissions Matrix
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-6">
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 w-full">
-                    {permissions.map((p) => (
-                      <div
-                        key={p}
-                        className="p-3.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/80 font-mono text-xs flex items-center gap-2 text-slate-800 dark:text-slate-200 font-medium hover:border-purple-300 dark:hover:border-purple-700 hover:bg-purple-50/40 dark:hover:bg-purple-950/40 transition-colors"
-                      >
-                        <Key className="size-4 text-purple-700 dark:text-purple-400 shrink-0" />
-                        <span className="truncate">{p}</span>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
+            <div className="w-full">
+              <AdminRbacScreen />
             </div>
           )}
         </div>
@@ -2367,6 +2706,106 @@ export default function DashboardPage() {
                     </div>
                   ) : (
                     <p className="text-xs text-slate-500">No specific line items defined for this RFQ.</p>
+                  )}
+                </div>
+
+                {/* RFQ Specification Attachments (Buyer Specifications - Read-Only for Vendor) */}
+                <FileAttachmentManager
+                  rfqId={quoteModalRfq.id}
+                  title="RFQ Specification Files & Drawings (Buyer Provided)"
+                  readOnly={true}
+                />
+
+                {/* If Revising an Existing Quote, show existing uploaded quotation files */}
+                {revisingQuoteId && (
+                  <FileAttachmentManager
+                    quotationId={revisingQuoteId}
+                    title="Current Quotation Attachments & Technical Datasheets"
+                    readOnly={false}
+                  />
+                )}
+
+                {/* Vendor Quotation Proposal / Datasheet Uploader */}
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 space-y-3 shadow-2xs">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <h3 className="text-xs sm:text-sm font-bold uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                      <Paperclip className="w-4 h-4 text-[#008779]" />
+                      <span>{revisingQuoteId ? "Attach Additional Revised Document (PDF / XLSX)" : "Vendor Proposal / Quotation Document (PDF / XLSX)"}</span>
+                    </h3>
+                    <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                      Optional • Max 15MB
+                    </span>
+                  </div>
+
+                  {quoteFileError && (
+                    <div className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 rounded-lg p-2.5 flex items-center gap-2">
+                      <AlertCircle className="size-4 shrink-0 text-red-500" />
+                      <span>{quoteFileError}</span>
+                    </div>
+                  )}
+
+                  {quotePendingFile ? (
+                    <div className="flex items-center justify-between p-3 rounded-lg border border-emerald-500/30 bg-emerald-50/50 dark:bg-emerald-950/20">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="p-2 rounded-md bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300">
+                          <FileText className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate">
+                            {quotePendingFile.name}
+                          </p>
+                          <p className="text-[11px] text-slate-500">
+                            {(quotePendingFile.size / (1024 * 1024)).toFixed(2)} MB • Ready to upload upon submission
+                          </p>
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setQuotePendingFile(null);
+                          setQuoteFileError(null);
+                        }}
+                        className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 rounded-full cursor-pointer"
+                        title="Remove file"
+                      >
+                        <X className="size-4" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <label className="border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl p-4 flex flex-col items-center justify-center gap-1.5 cursor-pointer hover:border-[#008779] dark:hover:border-[#008779] transition-colors bg-slate-50/50 dark:bg-slate-800/40 hover:bg-[#008779]/5">
+                      <input
+                        type="file"
+                        accept=".pdf,.xlsx,.xls"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const allowedExts = [".pdf", ".xlsx", ".xls"];
+                          const ext = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
+                          if (!allowedExts.includes(ext)) {
+                            setQuoteFileError("Only PDF (.pdf) and Excel (.xlsx, .xls) files are permitted.");
+                            return;
+                          }
+                          if (file.size > 15 * 1024 * 1024) {
+                            setQuoteFileError("File exceeds maximum allowed size of 15MB.");
+                            return;
+                          }
+                          setQuoteFileError(null);
+                          setQuotePendingFile(file);
+                        }}
+                        className="hidden"
+                      />
+                      <div className="size-8 rounded-full bg-[#008779]/10 text-[#008779] flex items-center justify-center">
+                        <UploadCloud className="w-4 h-4" />
+                      </div>
+                      <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                        Click to select quotation PDF or technical specification
+                      </p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Supports PDF (.pdf) or Excel (.xlsx) up to 15MB
+                      </p>
+                    </label>
                   )}
                 </div>
 
@@ -2579,6 +3018,18 @@ export default function DashboardPage() {
                   </div>
                 )}
 
+                {/* Quotation Documents & Technical Datasheets */}
+                <FileAttachmentManager
+                  quotationId={selectedDetailQuote.id}
+                  title="Quotation Documents & Technical Datasheet"
+                  readOnly={
+                    (role !== "vendor" && role !== "admin") ||
+                    (role === "vendor" && !!user?.id && !!selectedDetailQuote.vendorId && selectedDetailQuote.vendorId !== user.id) ||
+                    selectedDetailQuote.status === "ACCEPTED" ||
+                    selectedDetailQuote.status === "REJECTED"
+                  }
+                />
+
                 {/* Footer Buttons for Buyer, Vendor & Admin */}
                 <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-2">
                   <Button
@@ -2760,6 +3211,34 @@ export default function DashboardPage() {
                     <p className="text-slate-500 italic">No itemized line items recorded.</p>
                   )}
                 </div>
+
+                {/* RFQ Specification Attachments & Drawings */}
+                <FileAttachmentManager
+                  rfqId={selectedDetailRfq.id}
+                  title="RFQ Specification Files & Drawings (Buyer Provided)"
+                  readOnly={role !== "buyer" && role !== "admin"}
+                />
+
+                {role === "vendor" && (
+                  <div className="p-3 rounded-lg bg-[#008779]/10 dark:bg-[#008779]/20 border border-[#008779]/20 text-xs text-[#008779] dark:text-[#00a896] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <span>
+                      📌 <strong>Vendor Notice:</strong> You can download buyer specifications above. To submit your own quotation with proposal documents & technical PDFs, click <strong>"Submit Quotation"</strong>.
+                    </span>
+                    {selectedDetailRfq.status === "PUBLISHED" && (
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          const rfqToQuote = selectedDetailRfq;
+                          setSelectedDetailRfq(null);
+                          handleOpenQuoteModal(rfqToQuote);
+                        }}
+                        className="h-7 text-xs bg-[#008779] hover:bg-[#007063] text-white shrink-0 self-start sm:self-auto cursor-pointer"
+                      >
+                        Submit Quotation
+                      </Button>
+                    )}
+                  </div>
+                )}
 
                 {/* Received Quotations for this RFQ (Buyer & Admin Evaluation) */}
                 {(role === "buyer" || role === "admin") && (
@@ -3082,6 +3561,13 @@ export default function DashboardPage() {
                       </div>
                     </div>
 
+                    {/* RFQ Tender Specification Documents */}
+                    <FileAttachmentManager
+                      rfqId={comparisonData.rfq.id}
+                      title="RFQ Specification Files & BOM Documents"
+                      readOnly={role !== "buyer" && role !== "admin"}
+                    />
+
                     {/* Sorting Toolbar */}
                     <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200/80 dark:border-slate-700/80 flex flex-wrap items-center justify-between gap-3">
                       <div className="flex items-center gap-2 text-xs font-bold text-slate-600 dark:text-slate-300">
@@ -3274,6 +3760,15 @@ export default function DashboardPage() {
                                     </div>
                                   </div>
                                 )}
+
+                                {/* Quotation Attachments & Datasheets */}
+                                <div className="pt-2">
+                                  <FileAttachmentManager
+                                    quotationId={q.id}
+                                    title="Attached Proposal Documents"
+                                    readOnly={true}
+                                  />
+                                </div>
                               </div>
 
                               {/* Card Action: Award Button */}
