@@ -4,6 +4,7 @@ import React from "react";
 import { Button } from "@/components/ui/button";
 import { TableSearchBar } from "@/components/search/table-search-bar";
 import { OverviewTable } from "@/components/dashboard/overview-table";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   FileText,
   Plus,
@@ -215,13 +216,23 @@ export function OverviewTab({
               <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
                 {role === "vendor" ? "ALL BIDS & TENDERS" : role === "admin" ? "ALL RFQS & BIDS" : "ALL IN-PROCESS"}
               </span>
-              <span className="text-3xl font-black text-slate-900 dark:text-slate-100 tracking-tight block">
-                {allDashboardItems.length}
-              </span>
+              {isLoadingData ? (
+                <div className="flex justify-end py-1">
+                  <Skeleton className="h-8 w-16 rounded-md" />
+                </div>
+              ) : (
+                <span className="text-3xl font-black text-slate-900 dark:text-slate-100 tracking-tight block">
+                  {allDashboardItems.length}
+                </span>
+              )}
             </div>
           </div>
           <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 text-[11px] font-medium text-slate-500 dark:text-slate-400">
-            Count: {allDashboardItems.length}
+            {isLoadingData ? (
+              <Skeleton className="h-3.5 w-16 rounded" />
+            ) : (
+              <span>Count: {allDashboardItems.length}</span>
+            )}
           </div>
         </div>
 
@@ -242,13 +253,23 @@ export function OverviewTab({
               <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
                 {role === "vendor" ? "SUBMITTED BIDS" : role === "admin" ? "SUBMITTED BIDS" : "IN PROGRESS"}
               </span>
-              <span className="text-3xl font-black text-slate-900 dark:text-slate-100 tracking-tight block">
-                {inProcessQuotes.filter((q) => q.status === "SUBMITTED").length}
-              </span>
+              {isLoadingData ? (
+                <div className="flex justify-end py-1">
+                  <Skeleton className="h-8 w-16 rounded-md" />
+                </div>
+              ) : (
+                <span className="text-3xl font-black text-slate-900 dark:text-slate-100 tracking-tight block">
+                  {inProcessQuotes.filter((q) => q.status === "SUBMITTED").length}
+                </span>
+              )}
             </div>
           </div>
           <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 text-[11px] font-medium text-slate-500 dark:text-slate-400">
-            Count: {inProcessQuotes.filter((q) => q.status === "SUBMITTED").length}
+            {isLoadingData ? (
+              <Skeleton className="h-3.5 w-16 rounded" />
+            ) : (
+              <span>Count: {inProcessQuotes.filter((q) => q.status === "SUBMITTED").length}</span>
+            )}
           </div>
         </div>
 
@@ -269,13 +290,23 @@ export function OverviewTab({
               <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
                 {role === "vendor" ? "SHORTLISTED BIDS" : "SHORTLISTED"}
               </span>
-              <span className="text-3xl font-black text-slate-900 dark:text-slate-100 tracking-tight block">
-                {inProcessQuotes.filter((q) => q.status === "SHORTLISTED").length}
-              </span>
+              {isLoadingData ? (
+                <div className="flex justify-end py-1">
+                  <Skeleton className="h-8 w-16 rounded-md" />
+                </div>
+              ) : (
+                <span className="text-3xl font-black text-slate-900 dark:text-slate-100 tracking-tight block">
+                  {inProcessQuotes.filter((q) => q.status === "SHORTLISTED").length}
+                </span>
+              )}
             </div>
           </div>
           <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 text-[11px] font-medium text-slate-500 dark:text-slate-400">
-            Count: {inProcessQuotes.filter((q) => q.status === "SHORTLISTED").length}
+            {isLoadingData ? (
+              <Skeleton className="h-3.5 w-16 rounded" />
+            ) : (
+              <span>Count: {inProcessQuotes.filter((q) => q.status === "SHORTLISTED").length}</span>
+            )}
           </div>
         </div>
 
@@ -296,13 +327,23 @@ export function OverviewTab({
               <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
                 {role === "vendor" ? "AWARDED CONTRACTS" : "ACCEPTED"}
               </span>
-              <span className="text-3xl font-black text-slate-900 dark:text-slate-100 tracking-tight block">
-                {inProcessQuotes.filter((q) => q.status === "ACCEPTED").length}
-              </span>
+              {isLoadingData ? (
+                <div className="flex justify-end py-1">
+                  <Skeleton className="h-8 w-16 rounded-md" />
+                </div>
+              ) : (
+                <span className="text-3xl font-black text-slate-900 dark:text-slate-100 tracking-tight block">
+                  {inProcessQuotes.filter((q) => q.status === "ACCEPTED").length}
+                </span>
+              )}
             </div>
           </div>
           <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 text-[11px] font-medium text-slate-500 dark:text-slate-400">
-            Count: {inProcessQuotes.filter((q) => q.status === "ACCEPTED").length}
+            {isLoadingData ? (
+              <Skeleton className="h-3.5 w-16 rounded" />
+            ) : (
+              <span>Count: {inProcessQuotes.filter((q) => q.status === "ACCEPTED").length}</span>
+            )}
           </div>
         </div>
       </div>
