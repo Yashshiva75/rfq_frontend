@@ -1,4 +1,8 @@
+import type { UserRole } from "./auth";
+export type { UserRole };
+
 export type RfqStatus = "DRAFT" | "PUBLISHED" | "CLOSED" | "AWARDED" | "CANCELLED";
+
 
 export type QuotationStatus =
   | "DRAFT"

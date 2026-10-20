@@ -111,7 +111,7 @@ export const SidebarProvider = React.forwardRef<
       >
         <div
           ref={ref}
-          className={cn("flex min-h-screen w-full bg-white dark:bg-slate-950 relative", className)}
+          className={cn("flex h-screen w-full bg-white dark:bg-slate-950 overflow-hidden relative", className)}
           {...props}
         >
           {children}
@@ -145,7 +145,7 @@ export const Sidebar = React.forwardRef<
         data-state={open ? "open" : "closed"}
         aria-label="Application Navigation"
         className={cn(
-          "bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 transition-all duration-300 ease-in-out z-40 flex flex-col shrink-0 overflow-hidden",
+          "bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 transition-all duration-300 ease-in-out z-40 flex flex-col shrink-0 h-screen sticky top-0 overflow-hidden",
           // Desktop positioning: w-64 when open, w-16 icon bar when collapsed
           !isMobile && (open ? "w-64" : "w-16"),
           // Mobile positioning
@@ -205,7 +205,7 @@ export const SidebarInset = React.forwardRef<
   return (
     <main
       ref={ref}
-      className={cn("flex-1 flex flex-col min-w-0 bg-slate-50 dark:bg-slate-950 overflow-x-hidden", className)}
+      className={cn("flex-1 flex flex-col min-w-0 h-screen overflow-y-auto bg-slate-50 dark:bg-slate-950", className)}
       {...props}
     />
   );
@@ -221,7 +221,7 @@ export const SidebarHeader = React.forwardRef<
     <div
       ref={ref}
       className={cn(
-        "flex items-center border-b border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 transition-all overflow-hidden",
+        "flex items-center border-b border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 transition-all overflow-hidden shrink-0",
         open ? "p-3.5" : "p-3 justify-center",
         className
       )}
@@ -240,7 +240,7 @@ export const SidebarFooter = React.forwardRef<
     <div
       ref={ref}
       className={cn(
-        "border-t border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 mt-auto transition-all overflow-hidden",
+        "border-t border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 mt-auto shrink-0 transition-all overflow-hidden",
         open ? "p-3" : "p-2",
         className
       )}
@@ -259,7 +259,7 @@ export const SidebarContent = React.forwardRef<
     <div
       ref={ref}
       className={cn(
-        "flex-1 overflow-y-auto space-y-4 bg-white dark:bg-slate-900 transition-all overflow-x-hidden",
+        "flex-1 overflow-y-auto space-y-4 bg-white dark:bg-slate-900 transition-all overflow-x-hidden min-h-0",
         open ? "p-3" : "px-2 py-3",
         className
       )}
