@@ -48,7 +48,7 @@ export function AdminRbacScreen() {
   const [userSearch, setUserSearch] = useState("");
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/v1";
+  const API_URL = "/api";
 
   const getAuthToken = (): string => {
     if (typeof window === "undefined") return "";
@@ -97,7 +97,19 @@ export function AdminRbacScreen() {
   };
 
   useEffect(() => {
-    loadData();
+    const role = (
+      Cookies.get("user_role") ||
+      (typeof window !== "undefined"
+        ? JSON.parse(localStorage.getItem("rfq_user") || "{}")?.role
+        : "") ||
+      ""
+    ).toLowerCase();
+
+    if (role === "admin") {
+      loadData();
+    } else {
+      setLoading(false);
+    }
   }, []);
 
   // 2. Handle User Role Assignment
@@ -195,6 +207,25 @@ export function AdminRbacScreen() {
       u.role?.name?.toLowerCase().includes(q)
     );
   });
+
+  const currentUserRole = (
+    Cookies.get("user_role") ||
+    (typeof window !== "undefined"
+      ? JSON.parse(localStorage.getItem("rfq_user") || "{}")?.role
+      : "") ||
+    ""
+  ).toLowerCase();
+
+  if (currentUserRole && currentUserRole !== "admin") {
+    return (
+      <div className="p-8 text-center border border-red-200 dark:border-red-900/60 rounded-xl bg-red-50/50 dark:bg-red-950/20 text-red-700 dark:text-red-300">
+        <h3 className="font-bold text-sm">Access Denied</h3>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+          This console is restricted to Administrator accounts.
+        </p>
+      </div>
+    );
+  }
 
   if (loading) {
     return (

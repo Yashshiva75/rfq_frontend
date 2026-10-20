@@ -264,7 +264,15 @@ export default function DashboardPage() {
     try {
       const storedUser = localStorage.getItem("rfq_user");
       if (storedUser) {
-        setUser(JSON.parse(storedUser));
+        const parsed = JSON.parse(storedUser);
+        setUser(parsed);
+        const currentRole = (parsed?.role || "").toLowerCase();
+        // Reset tab if current tab is forbidden for this role
+        if ((activeTab === "roles" || activeTab === "users") && currentRole !== "admin") {
+          setActiveTab("overview");
+        } else if (activeTab === "create-rfq" && currentRole === "vendor") {
+          setActiveTab("overview");
+        }
       } else {
         router.push("/login");
       }
@@ -301,6 +309,12 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (user) {
+      const currentRole = (user.role || "").toLowerCase();
+      if ((activeTab === "roles" || activeTab === "users") && currentRole !== "admin") {
+        setActiveTab("overview");
+      } else if (activeTab === "create-rfq" && currentRole === "vendor") {
+        setActiveTab("overview");
+      }
       loadData();
     }
   }, [user?.role]);
@@ -310,6 +324,7 @@ export default function DashboardPage() {
     localStorage.removeItem("rfq_token");
     Cookies.remove("auth_token", { path: "/" });
     Cookies.remove("user_role", { path: "/" });
+    setActiveTab("overview");
     toast.success("Signed out successfully", {
       description: "You have been logged out of your session.",
     });
@@ -2523,8 +2538,8 @@ export default function DashboardPage() {
             </Card>
           )}
 
-          {/* TAB: USERS & ROLES (Admin) - Live RBAC Management Screen */}
-          {(activeTab === "users" || activeTab === "roles") && (
+          {/* TAB: USERS & ROLES (Admin only) - Live RBAC Management Screen */}
+          {role === "admin" && (activeTab === "users" || activeTab === "roles") && (
             <div className="w-full">
               <AdminRbacScreen />
             </div>
